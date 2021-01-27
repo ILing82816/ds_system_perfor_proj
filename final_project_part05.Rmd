@@ -1,0 +1,163 @@
+---
+title: "final_project_part05"
+author: "I-Ling Yeh"
+date: "2020/11/10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Load packages
+
+```{r, load_packages}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(visdat)
+library(caret)
+```
+
+## Overview
+
+This RMarkdown is machine learning final project part 5. First, I will compare the result of Option A and Option B to figure out which approaches is better. From the best model, identify the most important variables and visualize them with the probability of failure.
+
+##load back two best model:
+
+```{r, load_back_best_b_model}
+mod_b <- readr::read_rds("best_b_model.rds")
+```
+
+```{r, load_back_best_a_model}
+mod_a <- readr::read_rds("best_a_model.rds")
+```
+
+## Compare two modeling approach - Option A and Option B:
+
+```{r, prediction_result}
+model_pred_results <- mod_a$pred %>% tibble::as_tibble() %>% 
+  filter(mtry == mod_a$bestTune$mtry) %>% 
+  select(pred, obs, Fail, Pass, rowIndex, Resample) %>% 
+  mutate(model_name = "ModelA") %>% 
+  bind_rows(mod_b$pred %>% tibble::as_tibble() %>% 
+              filter(mtry == mod_b$bestTune$mtry) %>% 
+              select(pred, obs, Fail, Pass, rowIndex, Resample) %>% 
+              mutate(model_name = "ModelB"))
+```
+
+```{r, prediction_result_load}
+library(plotROC)
+```
+
+```{r, prediction_result_roc}
+model_pred_results %>% 
+  ggplot(mapping = aes(m = Fail,
+                       d = ifelse(obs == "Fail",
+                                  1,
+                                  0))) +
+  geom_roc(cutoffs.at = 0.5, mapping = aes(color = model_name)) +
+  coord_equal() +
+  style_roc()
+```
+
+From the ROC curve, these two models are quiet similar. From the below figure, we can see the `x07`, `x08`, `response_1`, and `xBB3` are important.  
+
+```{r, variable_importance}
+plot(varImp(mod_b))
+```
+
+```{r, variable_importancea}
+top_2_inputs <- (varImp(mod_b))$importance %>% 
+  tibble::rownames_to_column("var_name") %>% 
+  arrange(desc(Fail)) %>% 
+  slice(1:2) %>% 
+  pull(var_name)
+
+top_2_inputs
+```
+
+Then we visualize the probability of failure with the most important variables. 
+
+### create a prediction grid
+
+```{r, dataurl}
+data_url <- 'https://raw.githubusercontent.com/jyurko/INFSCI_2595_Fall_2020/master/HW/final_project/infsci_2595_final_project_data.csv'
+
+df <- readr::read_csv(data_url, col_names = TRUE)
+```
+
+```{r, dataset}
+step_2_b_df <- df %>% select(xA, xB, response_1, x07:x11, outcome_2) %>% 
+  mutate(outcome_2 = factor(outcome_2),
+         xA = factor(xA),
+         xB = factor(xB))
+step_2_b_df %>% select(-outcome_2) %>% dim()
+```
+
+```{r, grid_function}
+make_input_grid <- function(var_name, top_input_names, all_data)
+{
+  xvar <- all_data %>% select(var_name) %>% pull()
+  
+  if (var_name %in% top_input_names[1:2]){
+    # use 25 unique values between the min/max values
+    xgrid <- seq(min(xvar), max(xvar), length.out = 25)
+  } else if (var_name %in% c('xA')){
+    # specify quantiles to use
+    xgrid <- c('A1','A2')
+    xgrid <- as.vector(xgrid)
+  }else if (var_name %in% c('xB')){
+    # specify quantiles to use
+    xgrid <-  c('B1','B2','B3','B4')
+    xgrid <- as.vector(xgrid)
+  }else {
+    # set to their median values
+    xgrid <- median(xvar, na.rm = TRUE)
+  }
+  
+  return(xgrid)
+}
+```
+
+```{r, creat_grid_list}
+all_input_names <- step_2_b_df %>% select(-outcome_2) %>% names()
+
+test_input_list <- purrr::map(all_input_names,
+                              make_input_grid,
+                              top_input_names = top_2_inputs,
+                              all_data = step_2_b_df)
+
+test_input_grid <- expand.grid(test_input_list, 
+                               KEEP.OUT.ATTRS = FALSE,
+                               stringsAsFactors = FALSE) %>% 
+  purrr::set_names(all_input_names)
+
+test_input_grid %>% glimpse()
+```
+
+```{r, predict}
+pred_test_prob <- predict(mod_b, test_input_grid, type = "prob")
+
+pred_test_prob %>% class()
+
+pred_test_prob %>% head()
+```
+
+```{r, predict_visulization}
+test_input_grid %>% 
+  bind_cols(pred_test_prob) %>% 
+  ggplot(mapping = aes(x = x07, y = x08)) +
+  geom_raster(mapping = aes(fill = Fail)) +
+  facet_grid(xA ~ xB, labeller = "label_both") +
+  scale_fill_viridis_b() +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+From the above figure, when xB is `B3` and xA is `A1`, it have the obviously space that is minimizing the failure probability. Across discrete groups, the surface is multimodal that have more than one optimal input setting and the optimal input setting is vary.
+
+
+

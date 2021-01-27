@@ -1,0 +1,116 @@
+---
+title: "final_project_part02_a"
+author: "I-Ling Yeh"
+date: "2020/10/26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+
+```{r, load_packages}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(visdat)
+library(corrplot)
+```
+
+## Overview
+
+This RMarkdown is machine learning final project part 2. This part of project consists of 3 areas. I will start from using `lm()` and accessing the best model of 4 models. Second, I use `stan_lm()` to train bayesian linear models to fit 2 of the model I fit with `lm()`. Then I set up resampling to tune multiple models.   
+
+## Final project data
+
+Reads in the data for the final project.  
+
+```{r, read_glimpse_data}
+data_url <- 'https://raw.githubusercontent.com/jyurko/INFSCI_2595_Fall_2020/master/HW/final_project/infsci_2595_final_project_data.csv'
+
+df <- readr::read_csv(data_url, col_names = TRUE)
+```
+
+## Model training: Regression models-A
+
+Separate the variables associated with Step 1 in Option B.  
+
+```{r, make_step_1_data}
+step_1_df <- df %>% select(xA, xB, x01:x06, response_1) %>% 
+  mutate(xA = factor(xA),
+         xB = factor(xB))
+```
+
+Let's fit a simple linear model for `response_1`. Use `lm()` to fit linear models with discrete inputs.
+
+```{r, simple_model_lm_1}
+lm_01 <- lm(response_1 ~ xA+xB, step_1_df)
+```
+
+Summarize the model results with the `summary()` function.  
+
+```{r, show_simple_model_lm_1_summary}
+lm_01 %>% summary()
+```
+
+Let's fit a simple linear model for `response_1`. Use `lm()` to fit linear models with continuous inputs.
+
+```{r, simple_model_lm_2}
+lm_02 <- lm(response_1 ~ x01+x02+x03+x04+x05+x06, step_1_df)
+```
+
+Summarize the model results with the `summary()` function.  
+
+```{r, show_simple_model_lm_2_summary}
+lm_02 %>% summary()
+```
+
+Let's fit a simple linear model for `response_1`. Use `lm()` to fit linear models with all step1 inputs.
+
+```{r, simple_model_lm_3}
+lm_03 <- lm(response_1 ~ (.), step_1_df)
+```
+
+Summarize the model results with the `summary()` function.  
+
+```{r, show_simple_model_lm_3_summary}
+lm_03 %>% summary()
+```
+
+Let's fit a simple linear model for `response_1`. Use `lm()` to fit basis function linear models with all step1 inputs.
+
+```{r, simple_model_lm_4}
+lm_04 <- lm(response_1 ~ xA+xB+splines::ns(x01, df = 4)+splines::ns(x02, df = 4)+splines::ns(x03, df = 4)+x04+x05+x06, step_1_df)
+```
+
+Summarize the model results with the `summary()` function.  
+
+```{r, show_simple_model_lm_4_summary}
+lm_04 %>% summary()
+```
+
+I will use R-squared to select the the best model. `lm_03` and `lm_04` have higher R-squared, and we visualize the coefficient for these two models. As shown by the graph below, some coefficients appear to be significant since none of the confidence intervals "contain 0". 
+
+```{r, compare__lm_3_4}
+coefplot::multiplot(lm_03, lm_04) + theme_bw()
+```
+
+To zoom in, the 4 degrees of `splines::ns(x01)` and `splines::ns(x02)`, the fourth degree of `splines::ns(x03)` are obviously significant coefficients. 
+
+```{r, 1compare__lm_3_4}
+coefplot::multiplot(lm_03, lm_04, coefficients = names(coef(lm_04))[-1]) + theme_bw()
+```
+
+Zoom in more, the `xAA2`, `xBB2`, `xBB3`, `xBB4`, `x01`, `x02` are obviously significant coefficients.
+
+```{r, 2compare__lm_3_4}
+coefplot::multiplot(lm_03, lm_04, coefficients = names(coef(lm_03))[-1]) + theme_bw()
+```
+
+
+
+
+
+

@@ -1,0 +1,217 @@
+---
+title: "final_project_part01"
+author: "I-Ling Yeh"
+date: "2020/10/19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+
+```{r, load_packages}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(visdat)
+library(corrplot)
+```
+
+## Overview
+
+This RMarkdown is machine learning final project part 1. I will start from exploring and studying the data by visualization. It shows what is the distribution of the variables in the data set. It also demonstrates what is the relationships between the inputs.   
+
+## Final project data
+
+Reads in the data for the final project.  
+
+```{r, read_glimpse_data}
+data_url <- 'https://raw.githubusercontent.com/jyurko/INFSCI_2595_Fall_2020/master/HW/final_project/infsci_2595_final_project_data.csv'
+
+df <- readr::read_csv(data_url, col_names = TRUE)
+```
+
+## Exploration
+
+Start by simply looking at the data types and a glimpse of the first few rows.  
+
+```{r, check_glimpse}
+df %>% glimpse()
+```
+
+Check if any values are missing from the inputs. In this data set, it don't have any missing value.
+
+```{r, check_missing}
+visdat::vis_miss(df) +
+  theme(axis.text.x = element_text(size = 6.5, angle = 90))
+```
+
+Look at the counts of the output class, `outcome_2`. From the figure, we can see this is a balanced data set.
+
+```{r, count_output}
+df %>% 
+  ggplot(mapping = aes(x = outcome_2)) +
+  geom_bar() +
+  theme_bw()
+```
+
+Lst's now look at the distribution of the response variable, `response_1`. Visually, the response looks normal.  
+
+```{r, continuous_output}
+df %>% 
+  ggplot(mapping = aes(x = response_1)) +
+  geom_histogram(bins = 15) +
+  theme_bw()
+```
+
+Look at the distribution of the continuous input variables. Each continuous variable looks like a bell curve, as shown below. We can assume these variables would be normal distribution.
+
+```{r, distribution_input}
+df %>% tibble::rowid_to_column("obs_id") %>% 
+  tidyr::gather(key = "key", value = "value", -obs_id, -xA, -xB, -outcome_2, -response_1) %>% 
+  ggplot(mapping = aes(x = value)) +
+  geom_histogram(bins = 33) +
+  facet_wrap(~key, scales = "free") +
+  theme_bw() +
+  theme(axis.text.y = element_blank())
+```
+
+Look at the counts of `xA`.
+
+```{r, count_xA}
+df %>% 
+  ggplot(mapping = aes(x = xA)) +
+  geom_bar(mapping = aes(group = xA)) +
+  theme_bw()
+```
+
+Look at the counts of `xB`.
+
+```{r, count_xB}
+df %>% 
+  ggplot(mapping = aes(x = xB)) +
+  geom_bar(mapping = aes(group = xB)) +
+  theme_bw()
+```
+
+Let's summarize each of the variables.
+
+```{r, summary_data}
+df %>% summary()
+```
+
+Let's visualize the summary statistics with boxplots for each input.
+
+```{r, summary_continuouse}
+df %>% tibble::rowid_to_column("obs_id") %>% 
+  tidyr::gather(key = "key", value = "value", -obs_id, -xA, -xB, -outcome_2, -response_1) %>% 
+  ggplot(mapping = aes(x = key, y = value)) +
+  geom_boxplot() +
+  labs(x = "input name", y = "input value") +
+  theme_bw()
+```
+
+Let's look at breaking up the continuous variables based on the discrete `xA` and `xB`. Depend on the below figures, we can say there are no difference in input values and response_1 on the `xA`. However, there are some difference in input values and response_1 on the `xB`.
+
+The `x1:x11` breakup each boxplot based on the categorical inputs `xA` and `xB`.
+
+```{r, continuouse_xA}
+df %>% tibble::rowid_to_column("obs_id") %>% 
+  tidyr::gather(key = "key", value = "value", -obs_id, -xA, -xB, -outcome_2, -response_1) %>% 
+  ggplot(mapping = aes(x = key, y = value)) +
+  geom_boxplot(mapping = aes(fill = xA)) +
+  labs(x = "input name", y = "input value") +
+  theme_bw()
+```
+
+The `x1:x11` breakup each boxplot based on the categorical inputs `xB`.
+
+```{r, continuouse_xB}
+df %>% tibble::rowid_to_column("obs_id") %>% 
+  tidyr::gather(key = "key", value = "value", -obs_id, -xA, -xB, -outcome_2, -response_1) %>% 
+  ggplot(mapping = aes(x = key, y = value)) +
+  geom_boxplot(mapping = aes(fill = xB)) +
+  labs(x = "input name", y = "input value") +
+  theme_bw()
+```
+
+The `response_1` breakup each boxplot based on the categorical inputs `xA`.
+
+```{r, response1_xA}
+df %>% 
+  ggplot(mapping = aes(x = xA,
+                       y = response_1)) +
+  geom_boxplot() +
+  theme_bw()
+```
+
+The `response_1` breakup each boxplot based on the categorical inputs `xB`.
+
+```{r, response1_xB}
+df %>% 
+  ggplot(mapping = aes(x = xB,
+                       y = response_1)) +
+  geom_boxplot() +
+  theme_bw()
+```
+
+Let's use boxplot and 'break up' the step 1 input distributions into those associated with the `response_1` being less than it's median and those associated with the `response_1` being greater than it's meidan. From the below figure, we found `x01` and `x02` may a different.
+
+```{r, Step1_input_relationship_a}
+df %>% tibble::rowid_to_column("obs_id") %>% 
+  tidyr::gather(key = "key", value = "value", -obs_id, -xA, -xB, -outcome_2, -response_1,-(x07:x11)) %>% 
+  ggplot(mapping = aes(x = key, y = value)) +
+  geom_boxplot(mapping = aes(fill = response_1 > median(df$response_1),
+                             color = response_1 > median(df$response_1)),
+               alpha = 0.5) +
+  labs(x = "input name", y = "input value") +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+Look at scatter plots with linear and non-linear trend between the `response_1` and Step 1 input variables. And the figure can see `x01` and `x02` have some trend, that confirm what we say in the boxplots. 
+
+```{r, Step1_input_relationship}
+df %>% 
+  tibble::rowid_to_column("obs_id") %>% 
+  tidyr::gather(key = "key", value = "value", -obs_id,-(x07:x11), -xA, -xB, -outcome_2,-response_1) %>% 
+  ggplot(mapping = aes(x = value, y = response_1)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "steelblue", fill = "steelblue", alpha = 0.5) +
+  geom_smooth(color = "darkorange", fill = "darkorange", alpha = 0.5) +
+  facet_wrap(~key, scales = "free_x") +
+  theme_bw()
+```
+
+Let's see the influence of `x01` when visualizing the behavior with respect to `x02`. As shown below, the value of `x01` impact the trend with respect to `x02`.
+
+```{r, Step1_input_interceptionb}
+df %>% 
+  ggplot(mapping = aes(x = x02, y = response_1)) +
+  geom_point(mapping = aes(color = x01 > median(x01)),
+             size = 4, alpha = 0.5) +
+  geom_smooth(mapping = aes(group = x01 > median(x01),
+                            color = x01 > median(x01)),
+              size = 1.15) +
+  scale_color_viridis_d() +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+Next, visualize the relationships between the inputs to check if they correlation. From the below figure, we found there is not relationship between the input. 
+
+```{r, allinput_relationship}
+df %>% 
+  select(-xA, -xB, -outcome_2, -response_1) %>% 
+  cor() %>% 
+  corrplot::corrplot(method = "number", type = "upper")
+```
+
+`x09`, `x10`, and `response_1` displays the different median that is made by different outcome.
+```{r, step2_plot_groups, warning=FALSE, message=FALSE}
+df %>%
+  select(-xA, -xB, -(x01:x06)) %>%
+  GGally::ggpairs(mapping = aes(color = outcome_2)) +
+  theme_bw()
+```

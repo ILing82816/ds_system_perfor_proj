@@ -1,0 +1,324 @@
+---
+title: "final_project_part02_b"
+author: "I-Ling Yeh"
+date: "2020/11/2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+
+```{r, load_packages}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(visdat)
+library(corrplot)
+```
+
+## Final project data
+
+Reads in the data for the final project.  
+
+```{r, read_glimpse_data}
+data_url <- 'https://raw.githubusercontent.com/jyurko/INFSCI_2595_Fall_2020/master/HW/final_project/infsci_2595_final_project_data.csv'
+
+df <- readr::read_csv(data_url, col_names = TRUE)
+```
+
+## Model training: Regression models-B
+
+Separate the variables associated with Step 1 in Option B.  
+
+```{r, make_step_1_data}
+step_1_df <- df %>% select(xA, xB, x01:x06, response_1) %>% 
+  mutate(xA = factor(xA),
+         xB = factor(xB))
+```
+
+### Laplace Approximation approach
+
+Using the Laplace Approximation approach. To set up the posterior function, then use laplace approximation to get the posterior mode and variance matrix.
+
+```{r, post_function}
+lm_logpost <- function(unknowns, my_info)
+{
+  # extract the beta parameters
+  length_beta <- ncol(my_info$design_matrix) ## how many beta parmaeters????
+  beta_vec <- unknowns[1:length_beta]
+  
+  # extract the unbounded log-transformed noise
+  lik_varphi <- unknowns[length(unknowns)]
+  
+  ### back transfrom to the noise
+  lik_sigma <- exp(lik_varphi)
+  
+  # extract the design matrix
+  X <- my_info$design_matrix
+  
+  # calculate the mean trend using matrix operations
+  # remember that beta_vec is a REGULAR VECTOR...
+  mu <- X %*% as.matrix(beta_vec)
+  
+  # evaluate the log-likelihood, useful to convert the
+  # mean trend from a column vector matrix type to a 
+  # REGULAR vector using as.numeric()
+  log_lik <- sum(dnorm(x = my_info$yobs,
+                       mean = as.numeric(mu),
+                       sd = lik_sigma,
+                       log = TRUE))
+  
+  # evaluate the log-prior
+  log_prior_beta <- sum(dnorm(x = beta_vec,
+                              mean = my_info$mu_beta,
+                              sd = my_info$tau_beta,
+                              log = TRUE))
+  
+  log_prior_sigma <- dexp(x = lik_sigma, rate = my_info$sigma_rate, log=TRUE)
+  
+  log_prior <- log_prior_beta + log_prior_sigma
+  
+  # account for the derivative adjustment
+  log_derive_adjust <- lik_varphi
+  
+  # sum together
+  log_lik + log_prior + log_derive_adjust
+}
+```
+
+```{r, LA_function}
+my_laplace <- function(start_guess, logpost_func, ...)
+{
+  # code adapted from the `LearnBayes`` function `laplace()`
+  fit <- optim(start_guess,
+               logpost_func,
+               gr = NULL,
+               ...,
+               method = "BFGS",
+               hessian = TRUE,
+               control = list(fnscale = -1, maxit = 1001))
+  
+  mode <- fit$par
+  post_var_matrix <- -solve(fit$hessian)
+  p <- length(mode)
+  # we will discuss what int means in a few weeks...
+  int <- p/2 * log(2 * pi) + 0.5 * log(det(post_var_matrix)) + logpost_func(mode, ...)
+  # package all of the results into a list
+  list(mode = mode,
+       var_matrix = post_var_matrix,
+       log_evidence = int,
+       converge = ifelse(fit$convergence == 0,
+                         "YES", 
+                         "NO"),
+       iter_counts = as.numeric(fit$counts[1]))
+}
+```
+
+Design matrix:
+
+```{r, Xmat_03}
+Xmat03 <- model.matrix(response_1 ~ (.), data = step_1_df)
+Xmat03%>% dim()
+```
+
+```{r, Xmat_04}
+Xmat04 <- model.matrix(response_1 ~ xA+xB+splines::ns(x01, df = 4)+splines::ns(x02, df = 4)+splines::ns(x03, df = 4)+x04+x05+x06, data = step_1_df)
+Xmat04%>% dim()
+```
+
+Give the information to calculate the posterior:
+
+```{r, info_03}
+info_use_03 <- list(
+  design_matrix = Xmat03,
+  yobs = step_1_df$response_1,
+  mu_beta = 0,
+  tau_beta = 2,
+  sigma_rate = 0.5
+)
+```
+
+```{r, info_04}
+info_use_04 <- list(
+  design_matrix = Xmat04,
+  yobs = step_1_df$response_1,
+  mu_beta = 0,
+  tau_beta = 2,
+  sigma_rate = 0.5
+)
+```
+
+```{r, laplace_result_03}
+init_guess <- rep(-0.25, 12)
+
+laplace_result_03 <- my_laplace(init_guess, lm_logpost, info_use_03)
+laplace_result_03$mode
+```
+
+```{r, laplace_result_04}
+init_guess <- rep(-0.25, 21)
+
+laplace_result_04 <- my_laplace(init_guess, lm_logpost, info_use_04)
+laplace_result_04$mode
+```
+
+```{r, generate_post_samples}
+generate_post_samples <- function(mvn_info, length_beta, num_samples)
+{
+  MASS::mvrnorm(n = num_samples,
+                mu = mvn_info$mode ,
+                Sigma = mvn_info$var_matrix ) %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    purrr::set_names(c(sprintf("beta_%d", 0:(length_beta-1)), "varphi")) %>% 
+    mutate(sigma =  exp(varphi))
+}
+```
+
+```{r, generate_post_samples_03}
+set.seed(1231)
+post_samples_03 <- generate_post_samples(laplace_result_03, 11, 1e4)
+```
+
+```{r, generate_post_samples_04}
+set.seed(1231)
+post_samples_04 <- generate_post_samples(laplace_result_04, 20, 1e4)
+```
+
+Use the MSE as our performance matrix. Although mod04 have lower MSE, I will choose the mod03 as my best model. Because the mod03 has less coefficient to train.
+
+```{r, noise_03}
+post_samples_03 %>% 
+  ggplot(mapping = aes(x = sigma)) +
+  geom_histogram(bins = 55) +
+  theme_bw()
+```
+
+```{r, noise_04}
+post_samples_04 %>% 
+  ggplot(mapping = aes(x = sigma)) +
+  geom_histogram(bins = 55) +
+  theme_bw()
+```
+
+### rstanarm package
+
+Use `rstanarm stan_lm`.
+
+```{r, load_packages_a}
+#install.packages("rstanarm")
+library(rstanarm)
+```
+
+
+```{r, stan_lm_3}
+stan_lm_03 <- stan_lm(response_1 ~ .,
+                             data = step_1_df,
+                             prior = R2(0.5),
+                             seed = 12345)
+```
+
+```{r, summarize_stan_lm_3}
+stan_lm_03 %>% summary()
+```
+
+
+```{r, stan_lm_4}
+stan_lm_04 <- stan_lm(response_1 ~ xA+xB+splines::ns(x01, df = 4)+splines::ns(x02, df = 4)+splines::ns(x03, df = 4)+x04+x05+x06, data = step_1_df, prior = R2(location = 0.5), seed = 12345)
+```
+
+```{r, summarize_stan_lm_4}
+stan_lm_04 %>% summary()
+```
+
+First, I will use R-squared as performance matrix, thus `stan_lm_04` have higher R-squared.
+
+```{r, stan_lm_3_performance}
+rstanarm::bayes_R2(stan_lm_03) %>% quantile(c(0.05, 0.5, 0.95))
+```
+
+```{r, stan_lm_4_performance}
+rstanarm::bayes_R2(stan_lm_04) %>% quantile(c(0.05, 0.5, 0.95))
+```
+
+```{r, stan_lm_performance}
+purrr::map2_dfr(list(stan_lm_03, stan_lm_04),
+                as.character(3:4),
+                function(mod, mod_name){tibble::tibble(rsquared = bayes_R2(mod)) %>% 
+                    mutate(model_name = mod_name)}) %>% 
+  ggplot(mapping = aes(x = rsquared)) +
+  geom_freqpoly(bins = 55,
+                 mapping = aes(color = model_name),
+                 size = 1.1) +
+  coord_cartesian(xlim = c(0, 1)) +
+  ggthemes::scale_color_colorblind("Model") +
+  theme_bw()
+```
+
+Then I use Widely Applicable information Criterion that calculates the performance of the model and penalizes the performance of complex models based on the number of parameters. As the result, whatever the r-squared and WAIC, the `stan_lm_04` is the best model within two.  
+
+```{r, stan_lm_performanceb}
+stan_lm_03$waic <- waic(stan_lm_03)
+stan_lm_04$waic <- waic(stan_lm_04)
+```
+
+```{r, stan_lm_performancec}
+my_models <- stanreg_list(stan_lm_03, stan_lm_04,
+                          model_names = c("Linear additive", "basis function"))
+loo_compare(my_models, criterion = "waic")
+```
+
+The coefficient posterior distributions in `stan_lm_04` look like Gaussians.
+
+```{r, stan_lm_4_resulta}
+plot(stan_lm_04, pars = names(stan_lm_04$coefficients)[-1]) + 
+  geom_vline(xintercept = 0, color = "grey", linetype = "dashed", size = 1.) +
+  theme_bw()
+```
+
+
+```{r, stan_lm_4_resultb}
+as.data.frame(stan_lm_04) %>% tibble::as_tibble() %>% 
+  select(names(stan_lm_04$coefficients)) %>% 
+  tibble::rowid_to_column("post_id") %>% 
+  tidyr::gather(key = "key", value = "value", -post_id) %>% 
+  ggplot(mapping = aes(x = value)) +
+  geom_histogram(bins = 55) +
+  facet_wrap(~key, scales = "free") +
+  theme_bw() +
+  theme(axis.text.y = element_blank())
+```
+
+For my best model, `stan_lm_04`, I study the uncertainty in the noise.
+
+```{r, stan_lm_4_sigma}
+as.data.frame(stan_lm_04) %>% tibble::as_tibble() %>% 
+  select(sigma) %>% 
+  pull() %>% 
+  quantile(c(0.05, 0.5, 0.95))
+```
+
+In the part2-a, we fit a simple linear model for `response_1`. Use `lm()` to fit linear models with all step1 inputs.
+
+```{r, simple_model_lm_4}
+lm_04 <- lm(response_1 ~ xA+xB+splines::ns(x01, df = 4)+splines::ns(x02, df = 4)+splines::ns(x03, df = 4)+x04+x05+x06, step_1_df)
+```
+
+Summarize the model results with the `summary()` function.  
+
+```{r, show_simple_model_lm_4_summary}
+lm_04 %>% summary()
+```
+
+We compare the maximum likelihood estimate (MLE) on the noise, $\sigma$ and the posterior uncertainty on $\sigma$. 
+
+```{r, stan_lm_4_sigmab}
+as.data.frame(stan_lm_04) %>% tibble::as_tibble() %>% 
+  ggplot(mapping = aes(x = sigma)) +
+  geom_histogram(bins = 55) +
+  geom_vline(xintercept = stats::sigma(lm_04),
+             color = "darkorange", linetype = "dashed", size = 1.1) +
+  theme_bw()
+```

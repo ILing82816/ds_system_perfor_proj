@@ -1,0 +1,336 @@
+---
+title: "final_project_part03"
+author: "I-Ling Yeh"
+date: "2020/10/26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+
+```{r, load_packages}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(visdat)
+library(corrplot)
+library(caret)
+```
+
+## Overview
+
+This RMarkdown is machine learning final project part 3. Train, tune, and compare binary classifiers Option B via resampling.   
+
+## Final project data
+
+Reads in the data for the final project.  
+
+```{r, read_glimpse_data}
+data_url <- 'https://raw.githubusercontent.com/jyurko/INFSCI_2595_Fall_2020/master/HW/final_project/infsci_2595_final_project_data.csv'
+
+df <- readr::read_csv(data_url, col_names = TRUE)
+```
+
+Separate the variables associated with the Option B classification formulation. Notice that the `outcome_2` variable is converted to a factor with a specific ordering of the levels. Use this ordering when modeling in `caret` to make sure everyone predicts the `Fail` class as the "positive" class in the confusion matrix.  
+
+```{r, make_step_2_option_b_data}
+step_2_b_df <- df %>% select(xA, xB, response_1, x07:x11, outcome_2) %>% 
+  mutate(outcome_2 = factor(outcome_2),
+         xA = factor(xA),
+         xB = factor(xB))
+
+step_2_b_df %>% summary()
+```
+
+I will use 5-fold cross-validation with 3 repeats for this project.
+
+```{r, resampling, eval=TRUE}
+my_ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 3,
+                        classProbs = TRUE, summaryFunction = twoClassSummary, savePredictions = TRUE)
+```
+
+I choose ROC as my performance metric.
+
+```{r, performance metric}
+my_metric <- "ROC"
+```
+
+
+### Linear models
+
+Train and tune Logistic regression with additive term for providing a baseline comparison to the other models:
+
+```{r, logistic_model}
+set.seed(2001)
+mod_1 <- train(outcome_2 ~ .,
+               data = step_2_b_df,
+               method = "glm",
+               metric = my_metric,
+               preProc = c("center", "scale"),
+               trControl = my_ctrl)
+mod_1
+```
+
+```{r, logistic_model_confusion}
+confusionMatrix.train(mod_1)
+```
+
+Train and tune regularized regression with Elastic net:
+
+```{r, regularized_regression}
+set.seed(2001)
+mod_2_default <- train(outcome_2 ~ (.)^3,
+               data = step_2_b_df,
+               method = "glmnet",
+               metric = my_metric,
+               preProc = c("center", "scale"),
+               trControl = my_ctrl)
+mod_2_default
+```
+
+```{r, regularized_regression_tune}
+enet_grid <- expand.grid(alpha = seq(0.1, 0.9, by = 0.1),
+                         lambda = exp(seq(-6, -3, length.out = 15)))
+
+set.seed(2001)
+mod_2_tune <- train(outcome_2 ~ (.)^3,
+               data = step_2_b_df,
+               method = "glmnet",
+               tuneGrid = enet_grid,
+               preProc = c("center", "scale"),
+               metric = my_metric,
+               trControl = my_ctrl)
+
+mod_2_tune
+```
+
+```{r, regularized_regression_best_parameter}
+ggplot(mod_2_tune) + theme_bw()
+```
+
+```{r, regularized_regression_best_parameterb}
+mod_2_tune$bestTune
+```
+
+```{r, regularized_regression_coefficientb}
+coef(mod_2_tune$finalModel) %>% rownames()
+```
+
+There are 27 non-zero features in regularized regression with Elastic net.
+
+```{r, regularized_regression_coefficient}
+coef(mod_2_tune$finalModel, s = mod_2_tune$bestTune$lambda) %>% 
+  as.matrix() %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column("coef_name") %>% 
+  tibble::as_tibble() %>% 
+  purrr::set_names(c("coef_name", "coef_value")) %>% 
+  filter(coef_value != 0) %>% 
+  nrow()
+```
+
+```{r, regularized_regression_confusion}
+confusionMatrix.train(mod_2_tune)
+```
+
+Train and tune Naive Bayes:
+
+```{r, CART}
+set.seed(2001)
+mod_3 <- train(outcome_2 ~ .,
+               data = step_2_b_df,
+               method = 'nb',
+               metric = my_metric,
+               preProcess = c("center", "scale"),
+               trControl = my_ctrl)
+mod_3
+```
+
+```{r,CART_confusion}
+confusionMatrix.train(mod_3)
+```
+
+
+### Non-linear models
+
+Train and tune Neural network:
+
+```{r, Neural_network}
+set.seed(2001)
+mod_4_default <- train(outcome_2 ~ (.),
+               data = step_2_b_df,
+               method = 'nnet',
+               metric = my_metric,
+               preProc = c("center", "scale"),
+               trControl = my_ctrl,
+               trace = FALSE)
+mod_4_default
+```
+
+```{r, Neural_network_tune}
+nnet_grid <- expand.grid(size = c(3, 5, 10, 15),
+                         decay = exp(seq(-6, 3, length.out = 31)))
+
+set.seed(2001)
+
+mod_4_tune <- train(outcome_2 ~ (.),
+               data = step_2_b_df,
+               method = 'nnet',
+               tuneGrid = nnet_grid,
+               preProc = c("center", "scale"),
+               metric = my_metric,
+               trControl = my_ctrl,
+               trace = FALSE)
+mod_4_tune
+```
+
+```{r,Neural_network_best_parameter}
+mod_4_tune$bestTune
+```
+
+```{r, Neural_network_plot}
+plot(mod_4_tune, xTrans = log)
+```
+
+```{r, Neural_network_confusion}
+confusionMatrix.train(mod_4_tune)
+```
+
+```{r, Neural_network_netplot}
+library(NeuralNetTools)
+
+plotnet(mod_4_tune$finalModel)
+```
+
+Train and tune Random Forest:
+
+```{r, random_forest_default}
+set.seed(2001)
+mod_5 <- train(outcome_2 ~ .,
+                       data = step_2_b_df,
+                       method = "rf",
+                       metric = my_metric,
+                       trControl = my_ctrl,
+                       importance = TRUE)
+mod_5
+```
+
+```{r, random_forest_plot}
+plot(mod_5)
+```
+
+```{r, random_forest_confusion}
+confusionMatrix.train(mod_5)
+```
+
+Train and tune boosted tree model with `xgboost`:
+
+```{r, xgboost_default}
+set.seed(2001)
+mod_6 <- train(outcome_2 ~ .,
+                       data = step_2_b_df,
+                       method = "xgbTree",
+                       metric = my_metric,
+                       trControl = my_ctrl,
+                       importance = TRUE)
+mod_6
+```
+
+```{r,xgboost_best_parameter}
+mod_6$bestTune
+```
+
+```{r, xgboost_plot}
+plot(mod_6)
+```
+
+```{r, xgboost_confusion}
+confusionMatrix.train(mod_6)
+```
+
+Train and tune SVM:
+
+```{r, svm}
+set.seed(2001)
+mod_7 <- train(outcome_2 ~ .,
+               data = step_2_b_df,
+               method = "svmRadial",
+               metric = my_metric,
+               preProcess = c("center", "scale"),
+               trControl = my_ctrl)
+mod_7
+```
+
+```{r,svm_confusion}
+confusionMatrix.train(mod_7)
+```
+
+Compare all models:
+
+```{r, regression_result}
+regression_results = resamples(list(GLM = mod_1,
+                                    GLMNET_trips = mod_2_tune,
+                                    NB = mod_3,
+                                    NNET = mod_4_tune,
+                                    RF = mod_5,
+                                    XGB = mod_6,
+                                    SVM = mod_7))
+```
+
+```{r, rmse}
+dotplot(regression_results)
+```
+
+Let's now visualize the hold-out set predictions.
+
+```{r, prediction_result}
+model_pred_results <- mod_5$pred %>% tibble::as_tibble() %>% 
+  filter(mtry == mod_5$bestTune$mtry) %>% 
+  select(pred, obs, Fail, Pass, rowIndex, Resample) %>% 
+  mutate(model_name = "RF") %>% 
+  bind_rows(mod_2_tune$pred %>% tibble::as_tibble() %>% 
+              filter(alpha == mod_2_tune$bestTune$alpha,
+                     lambda == mod_2_tune$bestTune$lambda) %>% 
+              select(pred, obs, Fail, Pass, rowIndex, Resample) %>% 
+              mutate(model_name = "GLMNET_trips")) %>% 
+  bind_rows(mod_4_tune$pred %>% tibble::as_tibble() %>% 
+              filter(size == mod_4_tune$bestTune$size,
+                     decay == mod_4_tune$bestTune$decay) %>% 
+              select(pred, obs, Fail, Pass, rowIndex, Resample) %>% 
+              mutate(model_name = "NNET")) %>%
+  bind_rows(mod_6$pred %>% tibble::as_tibble() %>% 
+              filter(nrounds == mod_6$bestTune$nrounds,
+                     max_depth == mod_6$bestTune$max_depth,
+                     eta == mod_6$bestTune$eta,
+                     gamma == mod_6$bestTune$gamma,
+                     colsample_bytree == mod_6$bestTune$colsample_bytree,
+                     min_child_weight == mod_6$bestTune$min_child_weight,
+                     subsample == mod_6$bestTune$subsample) %>% 
+              select(pred, obs, Fail, Pass, rowIndex, Resample) %>% 
+              mutate(model_name = "XGB"))
+```
+
+```{r, prediction_result_load}
+library(plotROC)
+```
+
+```{r, prediction_result_roc}
+model_pred_results %>% 
+  ggplot(mapping = aes(m = Fail,
+                       d = ifelse(obs == "Fail",
+                                  1,
+                                  0))) +
+  geom_roc(cutoffs.at = 0.5, mapping = aes(color = model_name)) +
+  coord_equal() +
+  style_roc()
+```
+
+```{r, save_b_model}
+mod_5 %>% readr::write_rds("best_b_model.rds")
+```
+
+
+
